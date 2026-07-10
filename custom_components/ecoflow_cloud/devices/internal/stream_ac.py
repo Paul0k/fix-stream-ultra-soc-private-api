@@ -352,6 +352,8 @@ class StreamAC(BaseInternalDevice):
                     if packet.msg.cmd_id > 0:
                         self._parsedata(packet, stream_ac2.StreamACChamp_cmd50_3(), raw)
 
+                    self._extract_soc(raw)
+
                     _LOGGER.info("Found %u fields", len(raw["params"]))
 
                     raw["timestamp"] = utcnow()
@@ -372,6 +374,22 @@ class StreamAC(BaseInternalDevice):
                 str(raw_data.hex()),
             )
         return raw
+
+    @staticmethod
+    def _extract_soc(raw: dict[str, Any]) -> None:
+        """Map Stream Ultra's nested protobuf SoC fields to the common sensor key."""
+        params = raw["params"]
+
+        # The regular live-status packet (cmd 21) contains the current SoC.
+        cmd21 = params.get("Champ_cmd21_champ_cmd21_2")
+        if cmd21 is not None and cmd21.HasField("Champ_cmd21_2_field9"):
+            params["f32ShowSoc"] = float(cmd21.Champ_cmd21_2_field9)
+            return
+
+        # Some firmware versions report the same value in the cmd 50 packet.
+        cmd50 = params.get("Champ_cmd50_champ2")
+        if cmd50 is not None and cmd50.HasField("Champ_cmd50_2_field6"):
+            params["f32ShowSoc"] = float(cmd50.Champ_cmd50_2_field6)
 
     def _parsedata(self, packet, content, raw):
         try:

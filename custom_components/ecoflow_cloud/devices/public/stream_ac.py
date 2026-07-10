@@ -1,3 +1,4 @@
+import re
 from typing import Any
 
 from homeassistant.components.number import NumberEntity
@@ -440,8 +441,24 @@ class StreamAC(BaseDevice):
 
     def _prepare_data(self, raw_data) -> dict[str, Any]:
         res = super()._prepare_data(raw_data)
+        self._extract_soc(res)
         res = to_plain(res)
         return res
+
+    @staticmethod
+    def _extract_soc(raw: dict[str, Any]) -> None:
+        """Map Stream Ultra's nested protobuf SoC fields to the common sensor key."""
+        for key, field in (
+            ("Champ_cmd21_champ_cmd21_2", "Champ_cmd21_2_field9"),
+            ("Champ_cmd50_champ2", "Champ_cmd50_2_field6"),
+        ):
+            nested = raw.get(key)
+            if not isinstance(nested, dict):
+                continue
+            value = re.search(rf"{field}:\s*(\d+)", nested.get("repr", ""))
+            if value:
+                raw["f32ShowSoc"] = float(value.group(1))
+                return
 
     def _status_sensor(self, client: EcoflowApiClient) -> StatusSensorEntity:
         return StatusSensorEntity(client, self)
