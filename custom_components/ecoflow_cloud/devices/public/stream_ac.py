@@ -256,11 +256,8 @@ class StreamAC(BaseDevice):
             # "runtimePropertyIncrementalUploadPeriod": 2000,
             # "seriesConnectDeviceId": 1,
             # "seriesConnectDeviceStatus": "MASTER",
-            # "soc": 46,
-            LevelSensorEntity(client, self, "soc", const.STREAM_POWER_BATTERY)
-            .attr("designCap", const.ATTR_DESIGN_CAPACITY, 0)
-            .attr("fullCap", const.ATTR_FULL_CAPACITY, 0)
-            .attr("remainCap", const.ATTR_REMAIN_CAPACITY, 0),
+            # Stream Ultra does not publish the legacy "soc" field. Its SoC is
+            # reported as f32ShowSoc (derived from the nested cmd 21/50 packet).
             # "socketMeasurePower": 0.0,
             # "soh": 100,
             StateOfHealthSensorEntity(client, self, "soh", const.SOH),
@@ -441,24 +438,28 @@ class StreamAC(BaseDevice):
 
     def _prepare_data(self, raw_data) -> dict[str, Any]:
         res = super()._prepare_data(raw_data)
-        self._extract_soc(res)
+        self._extract_stream_values(res)
         res = to_plain(res)
         return res
 
     @staticmethod
-    def _extract_soc(raw: dict[str, Any]) -> None:
-        """Map Stream Ultra's nested protobuf SoC fields to the common sensor key."""
-        for key, field in (
-            ("Champ_cmd21_champ_cmd21_2", "Champ_cmd21_2_field9"),
-            ("Champ_cmd50_champ2", "Champ_cmd50_2_field6"),
-        ):
+    def _extract_stream_values(raw: dict[str, Any]) -> None:
+        """Map Stream Ultra's nested protobuf values to their sensor keys."""
+        mappings = (
+            ("Champ_cmd21_champ_cmd21_2", "Champ_cmd21_2_field9", "f32ShowSoc", float),
+            ("Champ_cmd21_champ_cmd21_2", "Champ_cmd21_2_field4", "vol", int),
+            ("Champ_cmd50_champ2", "Champ_cmd50_2_field6", "f32ShowSoc", float),
+            ("Champ_cmd50_champ2", "Champ_cmd50_2_field3", "vol", int),
+        )
+        for key, field, sensor_key, value_type in mappings:
+            if sensor_key in raw:
+                continue
             nested = raw.get(key)
             if not isinstance(nested, dict):
                 continue
             value = re.search(rf"{field}:\s*(\d+)", nested.get("repr", ""))
             if value:
-                raw["f32ShowSoc"] = float(value.group(1))
-                return
+                raw[sensor_key] = value_type(value.group(1))
 
     def _status_sensor(self, client: EcoflowApiClient) -> StatusSensorEntity:
         return StatusSensorEntity(client, self)

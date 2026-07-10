@@ -228,11 +228,8 @@ class StreamAC(BaseInternalDevice):
             # "runtimePropertyIncrementalUploadPeriod": 2000,
             # "seriesConnectDeviceId": 1,
             # "seriesConnectDeviceStatus": "MASTER",
-            # "soc": 46,
-            LevelSensorEntity(client, self, "soc", const.STREAM_POWER_BATTERY, False)
-            .attr("designCap", const.ATTR_DESIGN_CAPACITY, 0)
-            .attr("fullCap", const.ATTR_FULL_CAPACITY, 0)
-            .attr("remainCap", const.ATTR_REMAIN_CAPACITY, 0),
+            # Stream Ultra does not publish the legacy "soc" field. Its SoC is
+            # reported as f32ShowSoc (derived from the nested cmd 21/50 packet).
             # "socketMeasurePower": 0.0,
             # "soh": 100,
             StateOfHealthSensorEntity(client, self, "soh", const.SOH, False),
@@ -352,7 +349,7 @@ class StreamAC(BaseInternalDevice):
                     if packet.msg.cmd_id > 0:
                         self._parsedata(packet, stream_ac2.StreamACChamp_cmd50_3(), raw)
 
-                    self._extract_soc(raw)
+                    self._extract_stream_values(raw)
 
                     _LOGGER.info("Found %u fields", len(raw["params"]))
 
@@ -376,20 +373,26 @@ class StreamAC(BaseInternalDevice):
         return raw
 
     @staticmethod
-    def _extract_soc(raw: dict[str, Any]) -> None:
-        """Map Stream Ultra's nested protobuf SoC fields to the common sensor key."""
+    def _extract_stream_values(raw: dict[str, Any]) -> None:
+        """Map Stream Ultra's nested protobuf values to their sensor keys."""
         params = raw["params"]
 
-        # The regular live-status packet (cmd 21) contains the current SoC.
+        # The regular live-status packet (cmd 21) contains the current SoC and
+        # battery voltage. Both otherwise remain hidden inside a protobuf object.
         cmd21 = params.get("Champ_cmd21_champ_cmd21_2")
-        if cmd21 is not None and cmd21.HasField("Champ_cmd21_2_field9"):
-            params["f32ShowSoc"] = float(cmd21.Champ_cmd21_2_field9)
-            return
+        if cmd21 is not None:
+            if cmd21.HasField("Champ_cmd21_2_field9"):
+                params["f32ShowSoc"] = float(cmd21.Champ_cmd21_2_field9)
+            if cmd21.HasField("Champ_cmd21_2_field4"):
+                params["vol"] = cmd21.Champ_cmd21_2_field4
 
-        # Some firmware versions report the same value in the cmd 50 packet.
+        # Some firmware versions report the same values in the cmd 50 packet.
         cmd50 = params.get("Champ_cmd50_champ2")
-        if cmd50 is not None and cmd50.HasField("Champ_cmd50_2_field6"):
-            params["f32ShowSoc"] = float(cmd50.Champ_cmd50_2_field6)
+        if cmd50 is not None:
+            if "f32ShowSoc" not in params and cmd50.HasField("Champ_cmd50_2_field6"):
+                params["f32ShowSoc"] = float(cmd50.Champ_cmd50_2_field6)
+            if "vol" not in params and cmd50.HasField("Champ_cmd50_2_field3"):
+                params["vol"] = cmd50.Champ_cmd50_2_field3
 
     def _parsedata(self, packet, content, raw):
         try:
