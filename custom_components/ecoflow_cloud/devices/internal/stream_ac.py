@@ -28,6 +28,10 @@ from custom_components.ecoflow_cloud.sensor import (
 
 _LOGGER = logging.getLogger(__name__)
 
+# Each Stream Ultra battery module has a rated capacity of 1.92 kWh. The
+# private API does not publish cmsBattFullEnergy for this model.
+_STREAM_ULTRA_NOMINAL_ENERGY_WH = 1920
+
 
 class StreamAC(BaseInternalDevice):
     def sensors(self, client: EcoflowApiClient) -> list[SensorEntity]:
@@ -393,6 +397,13 @@ class StreamAC(BaseInternalDevice):
                 params["f32ShowSoc"] = float(cmd50.Champ_cmd50_2_field6)
             if "vol" not in params and cmd50.HasField("Champ_cmd50_2_field3"):
                 params["vol"] = cmd50.Champ_cmd50_2_field3
+
+        # Stream Ultra omits the cms fields used by the generic stored-energy
+        # sensor. Supply its documented per-module capacity and the decoded
+        # SoC so that sensor can calculate the available energy in Wh.
+        if "f32ShowSoc" in params:
+            params.setdefault("cmsBattSoc", params["f32ShowSoc"])
+            params.setdefault("cmsBattFullEnergy", _STREAM_ULTRA_NOMINAL_ENERGY_WH)
 
     def _parsedata(self, packet, content, raw):
         try:

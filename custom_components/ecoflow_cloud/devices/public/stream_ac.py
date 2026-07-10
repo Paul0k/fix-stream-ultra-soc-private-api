@@ -35,6 +35,11 @@ from custom_components.ecoflow_cloud.devices.public.stream_pv_helpers import (
 from custom_components.ecoflow_cloud.switch import EnabledEntity
 
 
+# Each Stream Ultra battery module has a rated capacity of 1.92 kWh. The
+# public API does not publish cmsBattFullEnergy for this model.
+_STREAM_ULTRA_NOMINAL_ENERGY_WH = 1920
+
+
 class StreamAC(BaseDevice):
     def sensors(self, client: EcoflowApiClient) -> list[SensorEntity]:
         return [
@@ -460,6 +465,13 @@ class StreamAC(BaseDevice):
             value = re.search(rf"{field}:\s*(\d+)", nested.get("repr", ""))
             if value:
                 raw[sensor_key] = value_type(value.group(1))
+
+        # Stream Ultra omits the cms fields used by the generic stored-energy
+        # sensor. Supply its documented per-module capacity and the decoded
+        # SoC so that sensor can calculate the available energy in Wh.
+        if "f32ShowSoc" in raw:
+            raw.setdefault("cmsBattSoc", raw["f32ShowSoc"])
+            raw.setdefault("cmsBattFullEnergy", _STREAM_ULTRA_NOMINAL_ENERGY_WH)
 
     def _status_sensor(self, client: EcoflowApiClient) -> StatusSensorEntity:
         return StatusSensorEntity(client, self)
